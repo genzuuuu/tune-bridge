@@ -17,10 +17,11 @@ export function buildQQImportScript(options: {
   title: string;
   songs: QQImportSong[];
 }): string {
+  const songs = Array.isArray(options.songs) ? options.songs : [];
   const payload = JSON.stringify({
     title: options.title,
-    songs: options.songs
-      .filter((song) => song.songmid || song.songid)
+    songs: songs
+      .filter((song) => song && (song.songmid || song.songid))
       .map((song) => ({
         songmid: song.songmid || "",
         songid: Number(song.songid || 0),
