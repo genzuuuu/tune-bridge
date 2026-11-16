@@ -22,9 +22,9 @@ const notoSansSc = Noto_Sans_SC({
 });
 
 export const metadata: Metadata = {
-  title: "歌单渡口 · QQ 音乐 → Apple Music",
+  title: "歌单渡口 · QQ 音乐 ⇄ Apple Music",
   description:
-    "把 QQ 音乐歌单转换成 Apple Music 可导入的 CSV / TXT / M3U，并附带导入步骤。",
+    "双向转换 QQ 音乐与 Apple Music 歌单，导出可导入的 CSV / TXT / M3U，并附带导入步骤。",
 };
 
 export default function RootLayout({

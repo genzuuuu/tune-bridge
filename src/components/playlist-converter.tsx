@@ -1,16 +1,26 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ArrowRight, Download, Link2, Loader2, Music2 } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ArrowRight,
+  Download,
+  Link2,
+  Loader2,
+  Music2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
+  detectInputKind,
   downloadTextFile,
   slugifyFilename,
   toCsv,
   toM3u,
   toTxt,
+  type ConvertDirection,
   type Playlist,
 } from "@/lib/playlist";
 
@@ -19,6 +29,7 @@ type Props = {
 };
 
 function formatDuration(ms: number) {
+  if (!ms) return "—";
   const total = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(total / 60);
   const seconds = String(total % 60).padStart(2, "0");
@@ -26,7 +37,10 @@ function formatDuration(ms: number) {
 }
 
 export function PlaylistConverter({ initialPlaylist }: Props) {
+  const [direction, setDirection] =
+    useState<ConvertDirection>("qq-to-apple");
   const [url, setUrl] = useState(initialPlaylist.sourceUrl);
+  const [pasteText, setPasteText] = useState("");
   const [playlist, setPlaylist] = useState(initialPlaylist);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -36,18 +50,119 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
     [playlist.playlistId, playlist.title]
   );
 
+  const goingToApple = direction === "qq-to-apple";
+  const sourceLabel = goingToApple ? "QQ 音乐" : "Apple Music";
+  const targetLabel = goingToApple ? "Apple Music" : "QQ 音乐";
+  const directionBadge = `${sourceLabel} → ${targetLabel}`;
+
+  function switchDirection(next: ConvertDirection) {
+    setDirection(next);
+    setError(null);
+    if (next === "qq-to-apple") {
+      setUrl(initialPlaylist.sourceUrl);
+      setPlaylist(initialPlaylist);
+      setPasteText("");
+    } else {
+      setUrl("");
+      setPasteText("");
+    }
+  }
+
   function convert() {
     setError(null);
     startTransition(async () => {
       try {
-        const response = await fetch(
-          `/api/qq-playlist?url=${encodeURIComponent(url.trim())}`
-        );
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "转换失败");
+        const trimmedUrl = url.trim();
+        const trimmedPaste = pasteText.trim();
+
+        if (!trimmedUrl && !trimmedPaste) {
+          throw new Error(
+            goingToApple
+              ? "请粘贴 QQ 音乐歌单链接，或粘贴歌曲列表"
+              : "请粘贴 Apple Music 歌单链接，或粘贴 / 上传歌曲列表"
+          );
         }
-        setPlaylist(payload as Playlist);
+
+        let payload: Playlist;
+
+        if (trimmedPaste && !trimmedUrl) {
+          const response = await fetch("/api/parse-playlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: trimmedPaste,
+              source: goingToApple ? "QQ Music Text" : "Apple Music Text",
+              title: goingToApple
+                ? "导入的 QQ 歌单"
+                : "导入的 Apple Music 歌单",
+            }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || "解析失败");
+          payload = body as Playlist;
+        } else {
+          const kind = detectInputKind(trimmedUrl);
+          if (goingToApple) {
+            if (kind === "apple") {
+              throw new Error(
+                "当前方向是 QQ → Apple。请粘贴 QQ 音乐链接，或切换到 Apple → QQ"
+              );
+            }
+            if (kind !== "qq" && kind !== "text") {
+              throw new Error("无法识别 QQ 音乐歌单链接");
+            }
+            if (kind === "text") {
+              const response = await fetch("/api/parse-playlist", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  text: trimmedUrl,
+                  source: "QQ Music Text",
+                  title: "导入的 QQ 歌单",
+                }),
+              });
+              const body = await response.json();
+              if (!response.ok) throw new Error(body.error || "解析失败");
+              payload = body as Playlist;
+            } else {
+              const response = await fetch(
+                `/api/qq-playlist?url=${encodeURIComponent(trimmedUrl)}`
+              );
+              const body = await response.json();
+              if (!response.ok) throw new Error(body.error || "转换失败");
+              payload = body as Playlist;
+            }
+          } else {
+            if (kind === "qq") {
+              throw new Error(
+                "当前方向是 Apple → QQ。请粘贴 Apple Music 链接，或切换到 QQ → Apple"
+              );
+            }
+            if (kind === "apple") {
+              const response = await fetch(
+                `/api/apple-playlist?url=${encodeURIComponent(trimmedUrl)}`
+              );
+              const body = await response.json();
+              if (!response.ok) throw new Error(body.error || "转换失败");
+              payload = body as Playlist;
+            } else {
+              const response = await fetch("/api/parse-playlist", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  text: trimmedUrl.includes("\n") ? trimmedUrl : trimmedPaste || trimmedUrl,
+                  source: "Apple Music Text",
+                  title: "导入的 Apple Music 歌单",
+                }),
+              });
+              const body = await response.json();
+              if (!response.ok) throw new Error(body.error || "解析失败");
+              payload = body as Playlist;
+            }
+          }
+        }
+
+        setPlaylist(payload);
       } catch (err) {
         setError(err instanceof Error ? err.message : "转换失败");
       }
@@ -61,14 +176,40 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
         <div className="relative z-10 max-w-2xl">
           <p className="brand-mark animate-rise">歌单渡口</p>
           <h1 className="mt-4 font-display text-4xl leading-[1.05] tracking-tight text-[var(--ink)] md:text-6xl animate-rise-delay">
-            QQ 音乐歌单，
-            <span className="text-[var(--accent)]">一键渡到</span>
-            Apple Music
+            {sourceLabel}
+            <span className="text-[var(--accent)]"> 一键渡到 </span>
+            {targetLabel}
           </h1>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-[var(--ink-soft)] md:text-lg animate-rise-delay-2">
-            已为你准备好「{initialPlaylist.title}」的可导入文件。下载
-            CSV / TXT，用 TuneMyMusic 导入 Apple Music 即可。
+            支持双向转换：粘贴歌单链接或歌曲列表，下载 CSV / TXT，再用
+            TuneMyMusic 导入目标平台。
           </p>
+
+          <div className="mt-6 inline-flex rounded-2xl border border-[var(--line)] bg-white/70 p-1 backdrop-blur animate-rise-delay-2">
+            <button
+              type="button"
+              onClick={() => switchDirection("qq-to-apple")}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                goingToApple
+                  ? "bg-[var(--ink)] text-white"
+                  : "text-[var(--ink-soft)] hover:text-[var(--ink)]"
+              }`}
+            >
+              QQ → Apple
+            </button>
+            <button
+              type="button"
+              onClick={() => switchDirection("apple-to-qq")}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                !goingToApple
+                  ? "bg-[var(--ink)] text-white"
+                  : "text-[var(--ink-soft)] hover:text-[var(--ink)]"
+              }`}
+            >
+              Apple → QQ
+            </button>
+          </div>
+
           <div className="mt-8 flex flex-col gap-3 sm:flex-row animate-rise-delay-3">
             <Button
               size="lg"
@@ -111,34 +252,65 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
             </h2>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--ink-soft)]">
-            <span>{playlist.author || "未知创建者"}</span>
+            <span>{playlist.author || playlist.source || "未命名来源"}</span>
             <span aria-hidden>·</span>
             <Badge variant="secondary" className="rounded-md">
               {playlist.songCount} 首
             </Badge>
             <Badge variant="outline" className="rounded-md">
-              QQ Music → Apple Music
+              {directionBadge}
             </Badge>
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-6 space-y-3">
             <Input
               value={url}
               onChange={(event) => setUrl(event.target.value)}
-              placeholder="粘贴其他 QQ 音乐歌单链接"
+              placeholder={
+                goingToApple
+                  ? "粘贴 QQ 音乐歌单链接"
+                  : "粘贴 Apple Music 歌单链接（music.apple.com/.../playlist/...）"
+              }
               className="h-11 rounded-xl border-[var(--line)] bg-white/80"
               onKeyDown={(event) => {
                 if (event.key === "Enter") convert();
               }}
             />
-            <Button
-              onClick={convert}
-              disabled={isPending || !url.trim()}
-              className="h-11 shrink-0 rounded-xl bg-[var(--ink)] text-white hover:bg-[var(--ink)]/90"
-            >
-              {isPending ? <Loader2 className="animate-spin" /> : <Link2 />}
-              重新转换
-            </Button>
+            <Textarea
+              value={pasteText}
+              onChange={(event) => setPasteText(event.target.value)}
+              placeholder={
+                "也可以粘贴歌曲列表：\n歌手 - 歌名\n或带 Name,Artist,Album 表头的 CSV"
+              }
+              className="min-h-[110px] rounded-xl border-[var(--line)] bg-white/80"
+            />
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                onClick={convert}
+                disabled={isPending || (!url.trim() && !pasteText.trim())}
+                className="h-11 shrink-0 rounded-xl bg-[var(--ink)] text-white hover:bg-[var(--ink)]/90"
+              >
+                {isPending ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <ArrowLeftRight />
+                )}
+                开始转换
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 rounded-xl border-[var(--line)]"
+                onClick={() => {
+                  setUrl(goingToApple ? initialPlaylist.sourceUrl : "");
+                  setPasteText("");
+                  setError(null);
+                  if (goingToApple) setPlaylist(initialPlaylist);
+                }}
+              >
+                <Link2 />
+                重置输入
+              </Button>
+            </div>
           </div>
           {error ? (
             <p className="mt-3 text-sm text-red-600" role="alert">
@@ -234,11 +406,12 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
 
         <aside className="panel rounded-[1.5rem] p-6 md:p-8">
           <h2 className="font-display text-2xl text-[var(--ink)]">
-            导入 Apple Music
+            导入 {targetLabel}
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-[var(--ink-soft)]">
-            Apple Music 本身不直接吃 QQ 歌单。最快路径是用
-            TuneMyMusic 把下面的文件转进去。
+            {goingToApple
+              ? "Apple Music 本身不直接吃 QQ 歌单。最快路径是用 TuneMyMusic 把文件转进去。"
+              : "QQ 音乐也不直接吃 Apple Music 歌单。同样用 TuneMyMusic：来源选文件，目标选 QQ 音乐。"}
           </p>
           <ol className="mt-6 space-y-4 text-sm leading-relaxed text-[var(--ink)]">
             <li className="flex gap-3">
@@ -259,13 +432,14 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                 >
                   TuneMyMusic
                 </a>
-                ，来源选 File / CSV，目标选 Apple Music。
+                ，来源选 File / CSV，目标选 {targetLabel}。
               </span>
             </li>
             <li className="flex gap-3">
               <span className="step">3</span>
               <span>
-                登录 Apple 账号后开始转移。曲库覆盖不到的歌会跳过，可稍后手动搜索补齐。
+                登录目标平台账号后开始转移。对不上的歌可稍后在{" "}
+                {targetLabel} 里手动搜索补齐。
               </span>
             </li>
           </ol>
@@ -273,11 +447,12 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
           <div className="mt-8 rounded-2xl border border-dashed border-[var(--line)] bg-white/50 p-4 text-sm text-[var(--ink-soft)]">
             <div className="flex items-center gap-2 font-medium text-[var(--ink)]">
               <ArrowRight className="size-4 text-[var(--accent)]" />
-              匹配提示
+              {goingToApple ? "Apple 匹配提示" : "QQ 匹配提示"}
             </div>
             <p className="mt-2 leading-relaxed">
-              导出时已去掉 Explicit 标记，并尽量保留歌手原名，方便 Apple Music
-              自动匹配。中文歌、现场版、原声带偶发对不上时，用歌名手动搜一次即可。
+              {goingToApple
+                ? "导出时已去掉 Explicit 标记，并尽量保留歌手原名，方便 Apple Music 自动匹配。"
+                : "Apple Music 链接需可公开访问。若链接打不开，可从 Apple Music / Music App 复制歌单文本，或导出 CSV 后粘贴到左侧。"}
             </p>
           </div>
         </aside>

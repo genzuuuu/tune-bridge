@@ -18,11 +18,35 @@ export type Playlist = {
   songs: Song[];
 };
 
+export type ConvertDirection = "qq-to-apple" | "apple-to-qq";
+
 export function extractPlaylistId(input: string): string | null {
   const trimmed = input.trim();
   if (/^\d{5,}$/.test(trimmed)) return trimmed;
   const match = trimmed.match(/(?:playlist\/|disstid=|id=)(\d{5,})/i);
   return match?.[1] ?? null;
+}
+
+export function detectInputKind(
+  input: string
+): "qq" | "apple" | "text" | "unknown" {
+  const trimmed = input.trim();
+  if (!trimmed) return "unknown";
+  if (
+    /music\.apple\.com\/.+\/playlist\//i.test(trimmed) ||
+    /^pl\.[a-zA-Z0-9]+$/.test(trimmed)
+  ) {
+    return "apple";
+  }
+  if (
+    /y\.qq\.com|i\.y\.qq\.com|i2\.y\.qq\.com/i.test(trimmed) ||
+    /^\d{5,}$/.test(trimmed) ||
+    /(?:playlist\/|disstid=|id=)\d{5,}/i.test(trimmed)
+  ) {
+    return "qq";
+  }
+  if (trimmed.includes("\n") || trimmed.includes(",")) return "text";
+  return "unknown";
 }
 
 export function toCsv(playlist: Playlist): string {
