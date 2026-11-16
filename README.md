@@ -1,8 +1,16 @@
 # 歌单渡口（Playlist Ferry / tune-bridge）
 
-双向转换 **QQ 音乐 ⇄ Apple Music** 歌单，导出可导入的 **CSV / TXT / M3U**。
+双向转换 **QQ 音乐 ⇄ Apple Music**。
 
-默认示例歌单：[🎧🏝️🍹](https://y.qq.com/n/ryqq_v2/playlist/9807408689)（137 首，QQ → Apple）。
+## 为什么 Apple → QQ 不用 TuneMyMusic？
+
+TuneMyMusic 的目标列表里**没有 QQ 音乐**。本项目对 Apple → QQ 走另一条路：
+
+1. 抓取 Apple Music 歌单（或粘贴文本）
+2. 用 QQ 搜索接口匹配 `songmid`
+3. 生成导入脚本：在已登录的 [y.qq.com](https://y.qq.com) 控制台运行，自动新建歌单并批量加歌
+
+QQ → Apple 仍可下载 CSV，用 TuneMyMusic 导入 Apple Music。
 
 ## 本地运行
 
@@ -11,21 +19,23 @@ npm install
 npm run dev
 ```
 
-浏览器打开 [http://localhost:3847](http://localhost:3847)。
+打开 [http://localhost:3847](http://localhost:3847)。
 
 ## 用法
 
 ### QQ → Apple Music
 
-1. 粘贴 QQ 音乐歌单链接，或粘贴「歌手 - 歌名」列表 / CSV
-2. 下载 CSV（推荐）或 TXT
-3. 打开 [TuneMyMusic](https://www.tunemymusic.com/transfer)，来源选 File / CSV，目标选 Apple Music
+1. 粘贴 QQ 歌单链接
+2. 下载 CSV
+3. [TuneMyMusic](https://www.tunemymusic.com/transfer) → 目标选 Apple Music
 
-### Apple Music → QQ
+### Apple Music → QQ 音乐
 
-1. 粘贴可公开访问的 Apple Music 歌单链接（`music.apple.com/.../playlist/...`）
-2. 若链接无法抓取，可粘贴歌曲列表或 CSV
-3. 下载 CSV / TXT，在 TuneMyMusic 目标选 QQ 音乐
+1. 切换到 **Apple → QQ**
+2. 粘贴可公开访问的 Apple Music 歌单链接
+3. 等待 QQ 曲库匹配完成
+4. 复制「QQ 导入脚本」
+5. 打开并登录 https://y.qq.com ，F12 控制台粘贴运行
 
 ## API
 
@@ -36,14 +46,8 @@ curl "http://localhost:3847/api/qq-playlist?url=https://y.qq.com/n/ryqq_v2/playl
 # Apple Music 歌单
 curl "http://localhost:3847/api/apple-playlist?url=https://music.apple.com/us/playlist/.../pl.xxxx"
 
-# 粘贴文本 / CSV
-curl -X POST http://localhost:3847/api/parse-playlist \
+# 匹配到 QQ
+curl -X POST http://localhost:3847/api/match-qq \
   -H 'content-type: application/json' \
-  -d '{"text":"Taylor Swift - Cruel Summer\n陈奕迅 - 富士山下","source":"Apple Music Text"}'
+  -d '{"songs":[{"name":"晴天","artist":"周杰伦","album":"","searchName":"晴天","searchArtist":"周杰伦","durationMs":0}]}'
 ```
-
-预生成导出文件：
-
-- `public/exports/qq-9807408689.csv`
-- `public/exports/qq-9807408689.txt`
-- `public/exports/qq-9807408689.m3u`
