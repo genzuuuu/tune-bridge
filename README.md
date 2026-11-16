@@ -35,7 +35,8 @@ npm run dev
 2. 粘贴可公开访问的 Apple Music 歌单链接
 3. 等待 QQ 曲库匹配完成
 4. 复制「QQ 导入脚本」
-5. 打开并登录 https://y.qq.com ，F12 控制台粘贴运行
+5. 打开并登录 https://y.qq.com ，按 ⌥⌘J（Mac）或 F12 打开控制台，粘贴**新版**导入脚本回车  
+   （旧版用已失效的 `fcg_music_add2songdir`，会出现「歌单已创建、0 首导入」；新版走 `AddSonglist` + 数字 songId）
 
 ## API
 
