@@ -72,10 +72,15 @@ function extractPlaylistId(url: string): string {
 
 export function extractApplePlaylistRef(input: string): string | null {
   const trimmed = input.trim();
-  if (/^pl\.[a-zA-Z0-9]+$/.test(trimmed)) {
-    return `https://music.apple.com/us/playlist/playlist/${trimmed}`;
+  // Catalog: pl.xxxx / User library: pl.u-xxxx
+  if (/^pl\.(?:u-)?[a-zA-Z0-9_-]+$/.test(trimmed)) {
+    return `https://music.apple.com/us/playlist/${trimmed}`;
   }
-  if (/music\.apple\.com\/.+\/playlist\//i.test(trimmed)) {
+  if (/music\.apple\.com\/[^/]+\/playlist\//i.test(trimmed)) {
+    return trimmed.split("?")[0];
+  }
+  // Some share links omit the slug: /playlist/pl.u-xxxx
+  if (/music\.apple\.com\/[^/]+\/playlist\/pl\./i.test(trimmed)) {
     return trimmed.split("?")[0];
   }
   return null;
@@ -86,6 +91,8 @@ export async function fetchApplePlaylist(input: string): Promise<Playlist> {
   if (!sourceUrl) {
     throw new Error("请粘贴 Apple Music 歌单链接（music.apple.com/.../playlist/...）");
   }
+
+  const isUserLibrary = /\/playlist\/pl\.u-/i.test(sourceUrl);
 
   const response = await fetch(sourceUrl, {
     headers: {
@@ -98,6 +105,11 @@ export async function fetchApplePlaylist(input: string): Promise<Playlist> {
   });
 
   if (!response.ok) {
+    if (isUserLibrary || response.status === 404) {
+      throw new Error(
+        "无法抓取该 Apple Music 链接（个人库歌单 pl.u- 或私密歌单通常打不开）。请把歌单设为「公开」后重试，或直接把「歌手 - 歌名」列表粘贴到下方文本框。"
+      );
+    }
     throw new Error(`无法打开 Apple Music 歌单（HTTP ${response.status}）`);
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -28,6 +28,7 @@ import {
 } from "@/lib/playlist";
 import {
   buildQQImportBookmarklet,
+  summarizeMatches,
   type MatchedTrack,
 } from "@/lib/qq-search";
 
@@ -41,6 +42,8 @@ type MatchSummary = {
   uncertain: number;
   unmatched: number;
 };
+
+const MATCH_BATCH_SIZE = 12;
 
 function formatDuration(ms: number) {
   if (!ms) return "—";
@@ -60,8 +63,13 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
   const [summary, setSummary] = useState<MatchSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [isMatching, startMatching] = useTransition();
+  const [isFetching, setIsFetching] = useState(false);
+  const [isMatching, setIsMatching] = useState(false);
+  const [matchProgress, setMatchProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const isBusy = isFetching || isMatching;
 
   const filenameBase = useMemo(
     () => slugifyFilename(playlist.title, playlist.playlistId),
@@ -106,132 +114,154 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
     }
   }
 
-  function convert() {
+  async function convert() {
     setError(null);
     setNotice(null);
     setMatches(null);
     setSummary(null);
-    startTransition(async () => {
-      try {
-        const trimmedUrl = url.trim();
-        const trimmedPaste = pasteText.trim();
+    setMatchProgress(null);
+    setIsFetching(true);
 
-        if (!trimmedUrl && !trimmedPaste) {
-          throw new Error(
-            goingToApple
-              ? "请粘贴 QQ 音乐歌单链接，或粘贴歌曲列表"
-              : "请粘贴 Apple Music 歌单链接，或粘贴歌曲列表"
-          );
-        }
+    try {
+      const trimmedUrl = url.trim();
+      const trimmedPaste = pasteText.trim();
 
-        let payload: Playlist;
+      if (!trimmedUrl && !trimmedPaste) {
+        throw new Error(
+          goingToApple
+            ? "请粘贴 QQ 音乐歌单链接，或粘贴歌曲列表"
+            : "请粘贴 Apple Music 歌单链接，或粘贴歌曲列表"
+        );
+      }
 
-        if (trimmedPaste && !trimmedUrl) {
-          const response = await fetch("/api/parse-playlist", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text: trimmedPaste,
-              source: goingToApple ? "QQ Music Text" : "Apple Music Text",
-              title: goingToApple
-                ? "导入的 QQ 歌单"
-                : "导入的 Apple Music 歌单",
-            }),
-          });
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error || "解析失败");
-          payload = body as Playlist;
-        } else {
-          const kind = detectInputKind(trimmedUrl);
-          if (goingToApple) {
-            if (kind === "apple") {
-              throw new Error(
-                "当前方向是 QQ → Apple。请粘贴 QQ 音乐链接，或切换到 Apple → QQ"
-              );
-            }
-            if (kind === "text") {
-              const response = await fetch("/api/parse-playlist", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  text: trimmedUrl,
-                  source: "QQ Music Text",
-                  title: "导入的 QQ 歌单",
-                }),
-              });
-              const body = await response.json();
-              if (!response.ok) throw new Error(body.error || "解析失败");
-              payload = body as Playlist;
-            } else if (kind === "qq") {
-              const response = await fetch(
-                `/api/qq-playlist?url=${encodeURIComponent(trimmedUrl)}`
-              );
-              const body = await response.json();
-              if (!response.ok) throw new Error(body.error || "转换失败");
-              payload = body as Playlist;
-            } else {
-              throw new Error("无法识别 QQ 音乐歌单链接");
-            }
-          } else if (kind === "qq") {
+      let payload: Playlist;
+
+      if (trimmedPaste && !trimmedUrl) {
+        const response = await fetch("/api/parse-playlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: trimmedPaste,
+            source: goingToApple ? "QQ Music Text" : "Apple Music Text",
+            title: goingToApple
+              ? "导入的 QQ 歌单"
+              : "导入的 Apple Music 歌单",
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "解析失败");
+        payload = body as Playlist;
+      } else {
+        const kind = detectInputKind(trimmedUrl);
+        if (goingToApple) {
+          if (kind === "apple") {
             throw new Error(
-              "当前方向是 Apple → QQ。请粘贴 Apple Music 链接，或切换到 QQ → Apple"
+              "当前方向是 QQ → Apple。请粘贴 QQ 音乐链接，或切换到 Apple → QQ"
             );
-          } else if (kind === "apple") {
-            const response = await fetch(
-              `/api/apple-playlist?url=${encodeURIComponent(trimmedUrl)}`
-            );
-            const body = await response.json();
-            if (!response.ok) throw new Error(body.error || "转换失败");
-            payload = body as Playlist;
-          } else {
+          }
+          if (kind === "text") {
             const response = await fetch("/api/parse-playlist", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                text: trimmedUrl.includes("\n")
-                  ? trimmedUrl
-                  : trimmedPaste || trimmedUrl,
-                source: "Apple Music Text",
-                title: "导入的 Apple Music 歌单",
+                text: trimmedUrl,
+                source: "QQ Music Text",
+                title: "导入的 QQ 歌单",
               }),
             });
             const body = await response.json();
             if (!response.ok) throw new Error(body.error || "解析失败");
             payload = body as Playlist;
+          } else if (kind === "qq") {
+            const response = await fetch(
+              `/api/qq-playlist?url=${encodeURIComponent(trimmedUrl)}`
+            );
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.error || "转换失败");
+            payload = body as Playlist;
+          } else {
+            throw new Error("无法识别 QQ 音乐歌单链接");
           }
+        } else if (kind === "qq") {
+          throw new Error(
+            "当前方向是 Apple → QQ。请粘贴 Apple Music 链接，或切换到 QQ → Apple"
+          );
+        } else if (kind === "apple") {
+          const response = await fetch(
+            `/api/apple-playlist?url=${encodeURIComponent(trimmedUrl)}`
+          );
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || "转换失败");
+          payload = body as Playlist;
+        } else {
+          const response = await fetch("/api/parse-playlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: trimmedUrl.includes("\n")
+                ? trimmedUrl
+                : trimmedPaste || trimmedUrl,
+              source: "Apple Music Text",
+              title: "导入的 Apple Music 歌单",
+            }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error || "解析失败");
+          payload = body as Playlist;
         }
-
-        setPlaylist(payload);
-        if (!goingToApple) {
-          await runMatch(payload);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "转换失败");
       }
-    });
+
+      setPlaylist(payload);
+      setIsFetching(false);
+      if (!goingToApple) {
+        await runMatch(payload);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "转换失败");
+      setIsFetching(false);
+    }
   }
 
   async function runMatch(target: Playlist = playlist) {
     setError(null);
     setNotice(null);
-    startMatching(async () => {
-      try {
+    setIsMatching(true);
+    setMatchProgress({ done: 0, total: target.songs.length });
+
+    try {
+      const allMatches: MatchedTrack[] = [];
+      for (let i = 0; i < target.songs.length; i += MATCH_BATCH_SIZE) {
+        const batch = target.songs.slice(i, i + MATCH_BATCH_SIZE);
         const response = await fetch("/api/match-qq", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ songs: target.songs }),
+          body: JSON.stringify({ songs: batch }),
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || "匹配失败");
-        setMatches(body.matches as MatchedTrack[]);
-        setSummary(body.summary as MatchSummary);
+        allMatches.push(...(body.matches as MatchedTrack[]));
+        setMatches([...allMatches]);
+        setSummary(summarizeMatches(allMatches));
+        setMatchProgress({
+          done: allMatches.length,
+          total: target.songs.length,
+        });
         setNotice(
-          `已在 QQ 曲库匹配：成功 ${body.summary.matched}，存疑 ${body.summary.uncertain}，未匹配 ${body.summary.unmatched}`
+          `正在匹配 QQ 曲库 ${allMatches.length}/${target.songs.length}…`
         );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "匹配失败");
       }
-    });
+
+      const finalSummary = summarizeMatches(allMatches);
+      setSummary(finalSummary);
+      setNotice(
+        `匹配完成：成功 ${finalSummary.matched}，存疑 ${finalSummary.uncertain}，未匹配 ${finalSummary.unmatched}`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "匹配失败");
+    } finally {
+      setIsMatching(false);
+      setMatchProgress(null);
+    }
   }
 
   async function copyImportScript() {
@@ -335,14 +365,16 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                   variant="outline"
                   className="h-12 rounded-xl border-[var(--line)] bg-white/70 px-6 text-base backdrop-blur"
                   onClick={() => runMatch()}
-                  disabled={isMatching || playlist.songs.length === 0}
+                  disabled={isBusy || playlist.songs.length === 0}
                 >
                   {isMatching ? (
                     <Loader2 className="animate-spin" />
                   ) : (
                     <Search />
                   )}
-                  重新匹配 QQ 曲库
+                  {matchProgress
+                    ? `匹配中 ${matchProgress.done}/${matchProgress.total}`
+                    : "重新匹配 QQ 曲库"}
                 </Button>
               </>
             )}
@@ -392,26 +424,30 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
               value={pasteText}
               onChange={(event) => setPasteText(event.target.value)}
               placeholder={
-                "也可以粘贴歌曲列表：\n歌手 - 歌名\n或带 Name,Artist,Album 表头的 CSV"
+                goingToApple
+                  ? "也可以粘贴歌曲列表：\n歌手 - 歌名\n或带 Name,Artist,Album 表头的 CSV"
+                  : "个人歌单链接（pl.u-）常无法抓取时，请粘贴歌曲列表：\n歌手 - 歌名\n或 CSV（Name,Artist,Album）"
               }
               className="min-h-[110px] rounded-xl border-[var(--line)] bg-white/80"
             />
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
                 onClick={convert}
-                disabled={
-                  isPending ||
-                  isMatching ||
-                  (!url.trim() && !pasteText.trim())
-                }
+                disabled={isBusy || (!url.trim() && !pasteText.trim())}
                 className="h-11 shrink-0 rounded-xl bg-[var(--ink)] text-white hover:bg-[var(--ink)]/90"
               >
-                {isPending || isMatching ? (
+                {isBusy ? (
                   <Loader2 className="animate-spin" />
                 ) : (
                   <ArrowLeftRight />
                 )}
-                {goingToApple ? "开始转换" : "抓取并匹配到 QQ"}
+                {isFetching
+                  ? "正在抓取歌单…"
+                  : isMatching && matchProgress
+                    ? `匹配中 ${matchProgress.done}/${matchProgress.total}`
+                    : goingToApple
+                      ? "开始转换"
+                      : "抓取并匹配到 QQ"}
               </Button>
               <Button
                 variant="outline"
@@ -635,7 +671,11 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
               <>
                 <li className="flex gap-3">
                   <span className="step">1</span>
-                  <span>粘贴 Apple Music 歌单链接，点击「抓取并匹配到 QQ」。</span>
+                  <span>
+                    粘贴公开 Apple Music 歌单链接；若是个人库链接（含{" "}
+                    <code>pl.u-</code>
+                    ），请改公开或粘贴歌曲列表。
+                  </span>
                 </li>
                 <li className="flex gap-3">
                   <span className="step">2</span>

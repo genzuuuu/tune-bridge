@@ -145,9 +145,9 @@ async function searchQQ(query: string): Promise<QQMatchCandidate[]> {
 }
 
 export async function matchSongOnQQ(source: Song): Promise<MatchedTrack> {
+  // Prefer one query first — extra retries are expensive for large playlists.
   const queries = [
-    `${source.searchName} ${source.searchArtist}`,
-    `${source.searchArtist} ${source.searchName}`,
+    `${source.searchName} ${source.searchArtist}`.trim(),
     source.searchName,
   ].filter(Boolean);
 
@@ -164,7 +164,7 @@ export async function matchSongOnQQ(source: Song): Promise<MatchedTrack> {
         score: scoreCandidate(source, result),
       });
     }
-    if (candidates.some((item) => item.score >= 0.9)) break;
+    if (candidates.some((item) => item.score >= 0.82)) break;
   }
 
   candidates.sort((a, b) => b.score - a.score);
@@ -183,7 +183,7 @@ export async function matchSongOnQQ(source: Song): Promise<MatchedTrack> {
 
 export async function matchSongsOnQQ(
   songs: Song[],
-  concurrency = 4
+  concurrency = 6
 ): Promise<MatchedTrack[]> {
   const results: MatchedTrack[] = new Array(songs.length);
   let cursor = 0;
@@ -200,6 +200,20 @@ export async function matchSongsOnQQ(
     Array.from({ length: Math.min(concurrency, songs.length) }, () => worker())
   );
   return results;
+}
+
+export function summarizeMatches(matches: MatchedTrack[]): {
+  total: number;
+  matched: number;
+  uncertain: number;
+  unmatched: number;
+} {
+  return {
+    total: matches.length,
+    matched: matches.filter((item) => item.status === "matched").length,
+    uncertain: matches.filter((item) => item.status === "uncertain").length,
+    unmatched: matches.filter((item) => item.status === "unmatched").length,
+  };
 }
 
 export function buildQQImportBookmarklet(options: {
