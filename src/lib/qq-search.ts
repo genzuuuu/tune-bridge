@@ -6,6 +6,7 @@ export type QQMatchCandidate = {
   album: string;
   songmid: string;
   songid: number;
+  songType: number;
   score: number;
   url: string;
 };
@@ -131,12 +132,17 @@ async function searchQQ(query: string): Promise<QQMatchCandidate[]> {
         .map((singer) => singer.name || "")
         .filter(Boolean)
         .join(", ");
+      const raw = item as {
+        type?: number;
+        songtype?: number;
+      };
       return {
         name,
         artist,
         album: item.albumname || "",
         songmid,
         songid: Number(item.songid || 0),
+        songType: Number(raw.type ?? raw.songtype ?? 0),
         score: 0,
         url: songmid ? `https://y.qq.com/n/ryqq/songDetail/${songmid}` : "",
       };
@@ -216,76 +222,4 @@ export function summarizeMatches(matches: MatchedTrack[]): {
   };
 }
 
-export function buildQQImportBookmarklet(options: {
-  title: string;
-  songmids: string[];
-}): string {
-  const payload = JSON.stringify({
-    title: options.title,
-    songmids: options.songmids,
-  });
-
-  const script = `
-(async()=>{
-  const data=${payload};
-  if(!location.hostname.includes('y.qq.com')){
-    alert('请先打开并登录 https://y.qq.com ，再运行导入脚本');
-    return;
-  }
-  const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
-  const uin=(document.cookie.match(/(?:^|;\\s*)uin=([^;]+)/)||[])[1]||'0';
-  const createBody=new URLSearchParams({
-    loginUin:uin,hostUin:'0',format:'json',inCharset:'utf8',outCharset:'utf8',
-    notice:'0',platform:'yqq',needNewCode:'0',g_tk:'5381',uin,name:data.title,
-    show:'1',formsender:'1',utf8:'1',
-    qzreferrer:'https://y.qq.com/portal/profile.html#sub=other&tab=create&'
-  });
-  const createRes=await fetch('https://c.y.qq.com/splcloud/fcgi-bin/create_playlist.fcg?g_tk=5381',{
-    method:'POST',
-    credentials:'include',
-    headers:{'Content-Type':'application/x-www-form-urlencoded','Referer':'https://y.qq.com/n/yqq/playlist'},
-    body:createBody
-  });
-  const created=await createRes.json();
-  if(Number(created.code)!==0 || !created.dirid){
-    alert('创建歌单失败：'+(created.msg||created.code||'请确认已登录 QQ 音乐网页版'));
-    return;
-  }
-  const dirid=created.dirid;
-  const mids=data.songmids.filter(Boolean);
-  let ok=0, fail=0;
-  for(let i=0;i<mids.length;i+=20){
-    const batch=mids.slice(i,i+20);
-    const qs=new URLSearchParams({
-      midlist:batch.join(','),
-      typelist:batch.map(()=>13).join(','),
-      dirid:String(dirid),
-      formsender:'4',
-      r2:'0',
-      r3:'1',
-      utf8:'1',
-      g_tk:'5381'
-    });
-    try{
-      const addRes=await fetch('https://c.y.qq.com/splcloud/fcgi-bin/fcg_music_add2songdir.fcg?g_tk=5381&'+qs.toString(),{
-        method:'GET',
-        credentials:'include',
-        headers:{Referer:'https://y.qq.com/n/yqq/playlist'}
-      });
-      const text=await addRes.text();
-      let json;
-      try { json=JSON.parse(text); }
-      catch(_){
-        const m=text.match(/\\{([\\s\\S]*)\\}/);
-        json=m?JSON.parse('{'+m[1]+'}'):{code:-1};
-      }
-      if(Number(json.code)===0) ok+=batch.length; else fail+=batch.length;
-    }catch(e){ fail+=batch.length; }
-    await sleep(400);
-  }
-  alert('导入完成\\n歌单：'+data.title+'\\n成功约 '+ok+' 首\\n失败/跳过 '+fail+' 首\\n请到「我的歌单」刷新查看');
-  location.href='https://y.qq.com/n/ryqq/profile';
-})();`.trim();
-
-  return script;
-}
+export { buildQQImportScript as buildQQImportBookmarklet } from "@/lib/qq-import-script";

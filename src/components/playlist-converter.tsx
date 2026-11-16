@@ -26,11 +26,8 @@ import {
   type ConvertDirection,
   type Playlist,
 } from "@/lib/playlist";
-import {
-  buildQQImportBookmarklet,
-  summarizeMatches,
-  type MatchedTrack,
-} from "@/lib/qq-search";
+import { buildQQImportScript } from "@/lib/qq-import-script";
+import { summarizeMatches, type MatchedTrack } from "@/lib/qq-search";
 
 type Props = {
   initialPlaylist: Playlist;
@@ -81,21 +78,30 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
   const targetLabel = goingToApple ? "Apple Music" : "QQ 音乐";
   const directionBadge = `${sourceLabel} → ${targetLabel}`;
 
-  const selectedMids = useMemo(
+  const selectedSongs = useMemo(
     () =>
       (matches || [])
-        .filter((item) => item.status !== "unmatched" && item.match?.songmid)
-        .map((item) => item.match!.songmid),
+        .filter(
+          (item) =>
+            item.status !== "unmatched" &&
+            item.match &&
+            (item.match.songid > 0 || item.match.songmid)
+        )
+        .map((item) => ({
+          songmid: item.match!.songmid,
+          songid: item.match!.songid,
+          songType: item.match!.songType ?? 0,
+        })),
     [matches]
   );
 
   const importScript = useMemo(
     () =>
-      buildQQImportBookmarklet({
+      buildQQImportScript({
         title: playlist.title || "从 Apple Music 导入",
-        songmids: selectedMids,
+        songs: selectedSongs,
       }),
-    [playlist.title, selectedMids]
+    [playlist.title, selectedSongs]
   );
 
   function switchDirection(next: ConvertDirection) {
@@ -265,13 +271,13 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
   }
 
   async function copyImportScript() {
-    if (selectedMids.length === 0) {
+    if (selectedSongs.length === 0) {
       setError("没有可导入的匹配歌曲，请先完成匹配");
       return;
     }
     await navigator.clipboard.writeText(importScript);
     setNotice(
-      `已复制导入脚本（${selectedMids.length} 首）。打开并登录 y.qq.com 后，按 F12 粘贴到控制台运行。`
+      `已复制导入脚本（${selectedSongs.length} 首）。打开并登录 y.qq.com，按 ⌥⌘J 打开控制台粘贴运行。`
     );
   }
 
@@ -355,7 +361,7 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                   size="lg"
                   className="h-12 rounded-xl bg-[var(--accent)] px-6 text-base text-white hover:bg-[var(--accent-deep)]"
                   onClick={copyImportScript}
-                  disabled={selectedMids.length === 0}
+                  disabled={selectedSongs.length === 0}
                 >
                   <Copy />
                   复制 QQ 导入脚本
@@ -401,7 +407,7 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
             </Badge>
             {summary ? (
               <Badge variant="outline" className="rounded-md">
-                可导入 {selectedMids.length}
+                可导入 {selectedSongs.length}
               </Badge>
             ) : null}
           </div>
@@ -607,7 +613,7 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                 variant="outline"
                 className="rounded-xl border-[var(--line)]"
                 onClick={copyImportScript}
-                disabled={selectedMids.length === 0}
+                disabled={selectedSongs.length === 0}
               >
                 <Copy /> 复制导入脚本
               </Button>
@@ -621,7 +627,7 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                     "text/javascript;charset=utf-8"
                   )
                 }
-                disabled={selectedMids.length === 0}
+                disabled={selectedSongs.length === 0}
               >
                 <Download /> 下载脚本
               </Button>
@@ -695,7 +701,9 @@ export function PlaylistConverter({ initialPlaylist }: Props) {
                     >
                       y.qq.com
                     </a>
-                    ，按 F12 打开控制台，粘贴脚本回车。脚本会新建歌单并批量加歌。
+                    ，按 ⌥⌘J（或 F12）打开控制台，粘贴
+                    <strong>新版</strong>导入脚本回车。脚本用
+                    AddSonglist 写入曲目（旧脚本只会建空歌单）。
                   </span>
                 </li>
               </>
